@@ -40,8 +40,8 @@ data Stmt = Bind Var Expr
           | State St
   deriving (Eq,Show)
 
-data Bitstr = Zero | One deriving(Eq,Show,Ord)
-data Label = Bits [Bitstr] | Default deriving(Eq,Show, Ord)
+data Bits = Zero | One deriving(Eq,Show,Ord)
+data Label = Bitstr [Bits] | Default deriving(Eq,Show, Ord)
 data Action = Reval | Break | Go Label | None deriving(Eq,Show)
 
 type LMap = Map.Map Label (Stmt, Action)
@@ -78,7 +78,7 @@ ex1 = P [("sum", TInt),("n", TInt)]
        Bind "n" (Lit 1),
        State St{conds=[LTE (Ref "n") (Lit 100)],
                 labels=Map.fromList
-                [(Bits [One], (Block [
+                [(Bitstr [One], (Block [
                    Bind "sum" (Add (Ref "sum") (Ref "n")),
                    Bind "n" (Add (Ref "n") (Lit 1))],
                    Reval))
@@ -92,12 +92,12 @@ ex2 = P [("x", TInt),("y", TInt)]
        Bind "y" (Lit 3),
        State St{conds=[LTE (Ref "x") (Lit 2), GT (Ref "x") (Ref "y")],
                 labels=Map.fromList
-                [(Bits [Zero, Zero], (Block [
+                [(Bitstr [Zero, Zero], (Block [
                    Bind "y" (Sub (Ref "y") (Lit 1))],
                    Reval)),
-                 (Bits [Zero, One], (Block [],
-                   Go (Bits [One, One]))),
-                 (Bits [One, Zero], (Block [
+                 (Bitstr [Zero, One], (Block [],
+                   Go (Bitstr [One, One]))),
+                 (Bitstr [One, Zero], (Block [
                    Bind "x" (Add (Ref "x") (Lit 1))],
                    Reval)),
                  (Default, (Block [
@@ -106,14 +106,28 @@ ex2 = P [("x", TInt),("y", TInt)]
                 ]}
    ])
 
+exFor :: Prog
+exFor = P [("i", TInt),("y", TInt)]
+   (Block [
+      Bind "i" (Lit 0),
+      Bind "x" (Lit 0),
+      State St{conds=[LT (Ref "i") (Lit 5)],
+            labels=Map.fromList
+            [(Bitstr [One], (Block [
+               Bind "x" (Add (Ref "x") (Lit 2)),
+               Bind "i" (Add (Ref "i") (Lit 1))
+            ],Reval))]}
+      ]
+   )
+
 testState :: St
 testState = St{conds=[LTE (Ref "n") (Lit 100), LTE (Ref "n") (Lit 99), LTE (Ref "n") (Lit 0)],
                 labels=Map.fromList
-                [(Bits [One], (Block [
+                [(Bitstr [One], (Block [
                    Bind "sum" (Add (Ref "sum") (Ref "n")),
                    Bind "n" (Add (Ref "n") (Lit 1))],
                    Reval)),
-                 (Bits [Zero], (Block [
+                 (Bitstr [Zero], (Block [
                    Bind "sum" (Add (Ref "sum") (Ref "n")),
                    Bind "n" (Add (Ref "n") (Lit 1))],
                    Reval)),
@@ -133,17 +147,17 @@ typeExpr :: Expr -> Env Type -> Maybe Type
 typeExpr (Lit _)   _ = Just TInt
 typeExpr (Add l r) m = case (typeExpr l m, typeExpr r m) of
                          (Just TInt, Just TInt) -> Just TInt
-                         _                      -> Nothing
+                         _                      -> error "internal error: illegal call to Add"
 typeExpr (Sub l r) m = case (typeExpr l m, typeExpr r m) of
                          (Just TInt, Just TInt) -> Just TInt
-                         _                      -> Nothing
+                         _                      -> error "internal error: illegal call to Sub"
 typeExpr (Ref v)   m = lookup v m
 
 -- | Type checking of statements in environment
 typeStmt :: Stmt -> Env Type -> Bool
 typeStmt (Bind v e) m = case (lookup v m, typeExpr e m) of
                         (Just tv, Just te) -> tv == te
-                        _                  -> False
+                        _                  -> error "internal error: undefined variable"
 typeStmt (Block ss) m = all (\s -> typeStmt s m) ss
 typeStmt (State s)  m = typeState s m
 
@@ -198,21 +212,21 @@ evalStmts []     m = m
 evalStmts (s:ss) m = evalStmts ss (evalStmt s m)
 
 evalState :: St -> Env Val -> Env Val
-evalState s m = case Map.lookup (Bits (getState (conds s) m)) (labels s) of
+evalState s m = case Map.lookup (Bitstr (getState (conds s) m)) (labels s) of
                                          (Just (b,a)) -> execState s (b,a) m
                                          (Nothing) -> case Map.lookup (Default) (labels s) of
                                                       (Just (bl,ac)) -> execState s (bl,ac) m
                                                       (Nothing) -> m
 
 execState :: St -> (Stmt, Action) -> Env Val -> Env Val
-execState s (b, a) m = case trace("\n>>> m: " ++ show m ++ "b: " ++ show b ++ show a)a of
+execState s (b, a) m = case a of
                        (Reval) -> (evalState s) (evalStmt b m)
                        (Break) -> evalStmt b m
                        (Go l)  -> case Map.lookup (l) (labels s) of
                                   (Just (bl, ac)) -> execState s (bl,ac) (evalStmt b m)
                                   (Nothing) -> m
 
-getState :: [Test] -> Env Val -> [Bitstr]
+getState :: [Test] -> Env Val -> [Bits]
 getState (t:ts) m = case evalTest t m of
                     (Right True) -> [One] ++ getState ts m
                     (Right False) -> [Zero] ++ getState ts m
@@ -227,5 +241,4 @@ evalProg (P ds s) = evalStmt s m
 
 runProg :: Prog -> Maybe (Env Val)
 runProg p = if typeProg p then Just (evalProg p)
-
                           else Nothing
