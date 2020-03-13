@@ -2,35 +2,43 @@
 
 ## Introduction
 
-Panicscript is an imperative programming language with a focus on simplicity, transparency, and explicit intention.
-Syntax is meant to be straight forward and simple with very little hidden from the programmer.
+Panicscript is an imperative programming language with a focus on simplicity,
+transparency, and explicit intention. Syntax is meant to be straight forward
+and simple with very little abstracted away from the programmer.
 
 ## Design
 
 ### Core
-- [] Int
-- [] Boolean
-- [] Variables
-- [] 'State' Control/Loop Structure
-- [] Functions
+- [X] Int
+- [X] Boolean
+- [X] Variables
+- [X] 'State' Control/Loop Structure
+- [X] First-class Functions
 
-These features were chosen for core because they satisfy most commonly used programming tasks.
+These features were chosen for core because they satisfy most commonly used
+programming tasks.
 
-The 'State' control structure is a unique take on case or switch statements in other languages. State accepts an
-arbitrary list of expressions that return boolean values. These expressions are individually evaluated and a binary
-number is returned based on the result. This binary is used in the labels to decide which path execution should take.
-State also provides a looping construct. When a label is matched, an action keyword to determine behavior can be given
-at the end of the block.
-Available keywords are:
+Functions can be defined and called recursively.
 
-- Reval			- Loops back to state and reevaluates expressions passed to State
+The 'State' control structure is a unique take on case or switch statements in
+other languages. State accepts an arbitrary list of expressions that return
+boolean values. These expressions are individually evaluated and a binary
+number is returned based on the result. This binary is used in the labels to
+decide which path execution should take.  State also provides a looping
+construct. When a label is matched, an action keyword to determine behavior can
+be given at the end of the block.  Available keywords are:
+
+- Reval			- Loops back to state and reevaluates expressions passed to
+  State
 - Break			- Escapes State construct
 - Go [label]	- Jumps to label specified
 
 Omission of action keyword causes fall through to next label.
 
-Labels provided do not need to be exhaustive of all possible binary combinations. If the return does not match a label,
-the Default label is executed. If there is no Default label and the return has no label, execution continues.
+Labels provided do not need to be exhaustive of all possible binary
+combinations. If the return does not match a label, the Default label is
+executed. If there is no Default label and the return has no label, execution
+continues.
 
 An example of the State control/loop structure,
 
@@ -94,5 +102,21 @@ Or if-else statements,
 
 
 ### Syntactic Sugar
-- [] Increment/Decrement
-- [] Ternary Statements
+- [X] Increment/Decrement
+- [X] Ternary Statements
+
+Increment and Decrement Sugar is implemented through abstracted Add/Sub
+Statements
+
+Ternary Statements are abstracted State structures
+
+### Safety
+- [X] Static type system
+
+Entire program, including functions are type checked before running.
+Additionally, internal errors are checked for during evaluation.
+
+### Implementation
+Functions are treated as expressions. When evaluated, The function is executed
+like it's own program, and it's value is replaced by whatever value is held in
+the "return" variable upon completion.

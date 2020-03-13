@@ -1,65 +1,15 @@
 module Panicscript where
 
+import Panicscript.Abstract
+import Panicscript.TypeCheck
+import Panicscript.Eval
+import Panicscript.Sugar
+
 import Data.Map as Map
-import Data.Maybe (fromJust)
 import Prelude hiding (lookup, GT, LT)
 
-import Debug.Trace
-import Data.Typeable
-
--- | Abstract syntax of expressions.
---
---     expr  ::=  int
---            |   expr + expr
---            |   expr ≤ expr
---            |   expr ≤= expr
---            |   expr > expr
---            |   expr >= expr
---            |   expr == expr
---            |   `!` expr
---            |   var
-
--- | Variables.
-type Var = String
-
-data Expr = Lit Int        -- literal integer
-          | Add Expr Expr  -- integer addition
-          | Sub Expr Expr  -- integer subtraction
-          | Ref Var        -- variable reference
-  deriving (Eq,Show)
-
-data Test = LTE Expr Expr  -- less than or equal to
-          | LT  Expr Expr  -- less than
-          | GTE Expr Expr  -- greater than or equal to
-          | GT  Expr Expr  -- greater than
-          | Not Expr       -- boolean negation
-  deriving(Eq, Show)
-
-data Stmt = Bind Var Expr
-          | Block [Stmt]
-          | State St
-  deriving (Eq,Show)
-
-data Bitstr = Zero | One deriving(Eq,Show,Ord)
-data Label = Bits [Bitstr] | Default deriving(Eq,Show, Ord)
-data Action = Reval | Break | Go Label | None deriving(Eq,Show)
-
-type LMap = Map.Map Label (Stmt, Action)
-
-data St = St { conds  :: [Test]
-             , labels :: LMap
-             } deriving(Eq, Show)
-
-data Type = TInt | TBool
-  deriving (Eq,Show)
-
-type Decl = (Var, Type)
-
-data Prog = P [Decl] Stmt
-  deriving (Eq,Show)
-
--- | Example program: sum all of the numbers from 1 to 100.
---
+-- | Ex1: Loop
+-- Sum all of the numbers from 1 to 100.
 --     Int sum
 --     Int i
 --
@@ -70,6 +20,10 @@ data Prog = P [Decl] Stmt
 --         sum = sum + n
 --         n += 1
 --         Reval
+--
+--   >>> runProg ex1
+--   Just (fromList [("n",Left 101),("sum",Left 5050)])
+--
 
 ex1 :: Prog
 ex1 = P [("sum", TInt),("n", TInt)]
@@ -84,6 +38,9 @@ ex1 = P [("sum", TInt),("n", TInt)]
                    Reval))
                 ]}
    ])
+
+-- | Ex2: Design code
+-- Example implementation of code from Design.md 
 
 ex2 :: Prog
 ex2 = P [("x", TInt),("y", TInt)]
@@ -106,126 +63,77 @@ ex2 = P [("x", TInt),("y", TInt)]
                 ]}
    ])
 
-testState :: St
-testState = St{conds=[LTE (Ref "n") (Lit 100), LTE (Ref "n") (Lit 99), LTE (Ref "n") (Lit 0)],
-                labels=Map.fromList
-                [(Bits [One], (Block [
-                   Bind "sum" (Add (Ref "sum") (Ref "n")),
-                   Bind "n" (Add (Ref "n") (Lit 1))],
-                   Reval)),
-                 (Bits [Zero], (Block [
-                   Bind "sum" (Add (Ref "sum") (Ref "n")),
-                   Bind "n" (Add (Ref "n") (Lit 1))],
-                   Reval)),
-                 (Default, (Block [
-                   Bind "sum" (Add (Ref "sum") (Ref "n")),
-                   Bind "n" (Add (Ref "n") (Lit 1))],
-                   Reval))
-                ]}
-testDs :: [Decl]
-testDs = [("sum", TInt), ("n", TInt)]
+-- | Ex3: Function example
+--  This example highlights Panicscript's recursive functionality
+
+fib :: Func
+fib = F {name="fib",
+        args=[(Lit 0)],
+        proc=P [("n", TInt), ("return", TInt)]
+        (Block [
+           State St{conds=[LTE (Ref "n") (Lit 1)],
+                    labels=Map.fromList
+                    [(Bits [One], ((Bind "return" (Ref "n")), Break)),
+                    (Default, (Block [
+                      Bind "return" (Add (Exec (name fib) [Sub (Ref "n") (Lit 1)]) (Exec (name fib) [Sub (Ref "n") (Lit 2)]))
+                      ]
+                      ,Break))]
+                   }
+        ])
+       }
+
+ex3 :: Prog
+ex3 = P [("x", TInt), ("fib", TInt)]
+   (Block [
+    Def "fib" fib,
+    Bind "x" (Exec "fib" [Lit 9])
+   ])
 
 
-type Env a = Map Var a
+-- | Ex4
+-- This example shows usage of syntactic sugar
 
--- | Type checking of expressions in environment
-typeExpr :: Expr -> Env Type -> Maybe Type
-typeExpr (Lit _)   _ = Just TInt
-typeExpr (Add l r) m = case (typeExpr l m, typeExpr r m) of
-                         (Just TInt, Just TInt) -> Just TInt
-                         _                      -> Nothing
-typeExpr (Sub l r) m = case (typeExpr l m, typeExpr r m) of
-                         (Just TInt, Just TInt) -> Just TInt
-                         _                      -> Nothing
-typeExpr (Ref v)   m = lookup v m
+ex4 :: Prog
+ex4 = P [("x", TInt), ("y", TInt), ("z", TInt), ("w", TInt)]
+   (Block [
+    Bind "x" (Lit 2),
+    Bind "y" (Lit 2),
+    inc "x",
+    dec "y",
+    tern (GT (Ref "x") (Ref "y")) (Bind "z" (Lit 10)) (Bind "z" (Lit 20)),
+    tern (LT (Ref "x") (Ref "y")) (Bind "w" (Lit 10)) (Bind "w" (Lit 20))
+   ])
 
--- | Type checking of statements in environment
-typeStmt :: Stmt -> Env Type -> Bool
-typeStmt (Bind v e) m = case (lookup v m, typeExpr e m) of
-                        (Just tv, Just te) -> tv == te
-                        _                  -> False
-typeStmt (Block ss) m = all (\s -> typeStmt s m) ss
-typeStmt (State s)  m = typeState s m
+-- |  Ex5: Type checking
+--  This example won't make it past type checking, variable "z" is out of scope
 
--- | Helper functions for checking State type validity
-typeState :: St -> Env Type -> Bool
-typeState (St{conds=ts, labels=l}) m = typeLabelStmts (Map.elems l) m
+ex5 :: Prog
+ex5 = P [("x", TInt), ("f", TInt)]
+   (Block [
+    Bind "x" (Lit 2),
+    Def "f" F{name="f",
+              args=[Lit 0],
+              proc=P [("x", TInt), ("return", TInt)]
+              (Block [
+                Bind "return" (Add (Ref "x") (Ref "z"))
+              ])
+             },
+    Bind "x" (Exec "f" [(Ref "x")])
+   ])
 
--- | Helper for label statements
-typeLabelStmts :: [(Stmt, Action)] -> Env Type -> Bool
-typeLabelStmts ((s,a):ls) m = typeStmt s m && typeLabelStmts ls m
-typeLabelStmts []         m = True
-
--- | Type check entire prog
-typeProg :: Prog -> Bool
-typeProg (P ds s) = typeStmt s (fromList ds)
-
-
-type Val = Either Int Bool
-
-evalExpr :: Expr -> Env Val -> Val
-evalExpr (Lit i)   _ = Left i
-evalExpr (Add l r) m = Left (evalInt l m + evalInt r m)
-evalExpr (Sub l r) m = Left (evalInt l m - evalInt r m)
-evalExpr (Ref x)   m = case lookup x m of
-                         Just v  -> v
-                         Nothing -> error "internal error: undefined variable"
-
-evalTest :: Test -> Env Val -> Val
-evalTest (LTE l r) m = Right (evalInt l m <= evalInt r m)
-evalTest (LT  l r) m = Right (evalInt l m <  evalInt r m)
-evalTest (GTE l r) m = Right (evalInt l m >= evalInt r m)
-evalTest (GT  l r) m = Right (evalInt l m >  evalInt r m)
-evalTest (Not e)   m = Right (not (evalBool e m))
-
-evalInt :: Expr -> Env Val -> Int
-evalInt e m = case evalExpr e m of
-                Left i  -> i
-                Right _ -> error "internal error: expected Int got Bool"
-
-evalBool :: Expr -> Env Val -> Bool
-evalBool e m = case evalExpr e m of
-                 Right b -> b
-                 Left _  -> error "internal error: expected Bool got Int"
-
-evalStmt :: Stmt -> Env Val -> Env Val
-evalStmt (Bind x e) m = insert x (evalExpr e m) m
-evalStmt (Block ss) m = evalStmts ss m
-evalStmt (State s)  m = evalState s m
-
-evalStmts :: [Stmt] -> Env Val -> Env Val
-evalStmts []     m = m
-evalStmts (s:ss) m = evalStmts ss (evalStmt s m)
-
-evalState :: St -> Env Val -> Env Val
-evalState s m = case Map.lookup (Bits (getState (conds s) m)) (labels s) of
-                                         (Just (b,a)) -> execState s (b,a) m
-                                         (Nothing) -> case Map.lookup (Default) (labels s) of
-                                                      (Just (bl,ac)) -> execState s (bl,ac) m
-                                                      (Nothing) -> m
-
-execState :: St -> (Stmt, Action) -> Env Val -> Env Val
-execState s (b, a) m = case trace("\n>>> m: " ++ show m ++ "b: " ++ show b ++ show a)a of
-                       (Reval) -> (evalState s) (evalStmt b m)
-                       (Break) -> evalStmt b m
-                       (Go l)  -> case Map.lookup (l) (labels s) of
-                                  (Just (bl, ac)) -> execState s (bl,ac) (evalStmt b m)
-                                  (Nothing) -> m
-
-getState :: [Test] -> Env Val -> [Bitstr]
-getState (t:ts) m = case evalTest t m of
-                    (Right True) -> [One] ++ getState ts m
-                    (Right False) -> [Zero] ++ getState ts m
-getState [] m = []
-
-evalProg :: Prog -> Env Val
-evalProg (P ds s) = evalStmt s m
-  where
-    m = fromList (Prelude.map (\(x,t) -> (x, init t)) ds)
-    init TInt  = Left 0
-    init TBool = Right False
-
-runProg :: Prog -> Maybe (Env Val)
-runProg p = if typeProg p then Just (evalProg p)
-
-                          else Nothing
+runExamples = do 
+   putStrLn "\nExample 1: Loop"
+   putStrLn "\tSums all numbers from 1 to 100\n"
+   putStrLn(show (runProg ex1) ++ "\n\n")
+   putStrLn "\nExample 2: Design code"
+   putStrLn "\tExample implementation of code from Design.md\n"
+   putStrLn(show (runProg ex2) ++ "\n\n")
+   putStrLn "\nExample 3: Function example"
+   putStrLn "\tThis example highlights Panicscript's function definition and recursive functionality\n"
+   putStrLn(show (runProg ex3) ++ "\n\n")
+   putStrLn "\nExample 4: Sugar example"
+   putStrLn "\tThis example shows usage of syntactic sugar\n"
+   putStrLn(show (runProg ex4) ++ "\n\n")
+   putStrLn "\nExample 5: Type checking"
+   putStrLn "\tThis example won't make it past type checking, variable \"z\" is out of scope\n"
+   putStrLn(show (runProg ex5) ++ "\n\n")
